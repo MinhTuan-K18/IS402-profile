@@ -1,0 +1,165 @@
+name: Test, publish image, and update GitOps
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: profile-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-test-publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install reproducible dependencies
+        run: npm ci
+
+      - name: Build the React application
+        run: npm run build
+
+      - name: Compute lowercase image name
+        id: image
+        shell: bash
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "name=$image" >> "$GITHUB_OUTPUT"
+          echo "tag=$image:sha-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and load the exact image to be tested
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ steps.image.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start container and run HTTP smoke checks
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name profile-ci -p 127.0.0.1:8080:8080 "$IMAGE_TAG"
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/healthz; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+          node scripts/smoke.mjs
+
+      - name: Collect container log and remove only the test container
+        if: always()
+        shell: bash
+        run: |
+          if docker container inspect profile-ci >/dev/null 2>&1; then
+            docker logs profile-ci
+            docker rm -f profile-ci
+          fi
+
+      - name: Login to GHCR for main branch publication only
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push the already-tested image and record its digest
+        id: publish
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE_TAG"
+          ref=$(docker image inspect "$IMAGE_TAG" --format '{{index .RepoDigests 0}}')
+          case "$ref" in
+            "$IMAGE_NAME"@sha256:*) ;;
+            *) echo "Unexpected image digest reference"; exit 1 ;;
+          esac
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Published image: $ref" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Checkout the separate GitOps repository
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.GITOPS_REPOSITORY }}
+          token: ${{ secrets.GITOPS_TOKEN }}
+          ref: main
+          path: gitops
+
+      - name: Replace exactly one image reference
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE_REF: ${{ steps.publish.outputs.ref }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+
+          path = Path('gitops/apps/profile/deployment.yaml')
+          old = path.read_text()
+          new, count = re.subn(
+              r'^(\s+image:\s*).+$',
+              lambda match: match.group(1) + os.environ['IMAGE_REF'],
+              old,
+              flags=re.MULTILINE,
+          )
+          if count != 1:
+              raise SystemExit(f'Expected one image field, found {count}')
+          path.write_text(new)
+          PY
+
+      - name: Commit and push the desired state
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        working-directory: gitops
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "is402-ci-bot"
+          git config user.email "is402-ci-bot@users.noreply.github.com"
+          git add apps/profile/deployment.yaml
+          if git diff --cached --quiet; then
+            echo "GitOps already points at this image"
+            exit 0
+          fi
+          git commit -m "Deploy profile from app commit $GITHUB_SHA"
+          git push origin HEAD:main
