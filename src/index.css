@@ -1,0 +1,63 @@
+:root {
+  font-family: 'Manrope Variable', system-ui, sans-serif;
+  color: #eef6ff;
+  background: #07111f;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --bg: #07111f;
+  --surface: #0b1829;
+  --surface-2: #0f2136;
+  --line: rgba(151, 186, 219, 0.16);
+  --line-strong: rgba(151, 186, 219, 0.28);
+  --text: #f2f7fc;
+  --muted: #93a9bd;
+  --cyan: #48e4d3;
+  --cyan-strong: #10cdbb;
+  --blue: #4f8cff;
+  --violet: #a979ff;
+  --display: 'Space Grotesk Variable', 'Manrope Variable', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 5.5rem;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+button,
+a {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+::selection {
+  color: #03100f;
+  background: var(--cyan);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
