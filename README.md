@@ -2,6 +2,9 @@
 
 Trang profile nhóm viết bằng React + Vite, được đóng gói bằng Docker multi-stage và phục vụ bằng Nginx trên cổng `8080`. Cấu trúc bám theo mục 11 của tài liệu hướng dẫn OpenStack Magnum và GitOps của môn IS402.
 
+Workflow kiểm tra image AMD64 bằng HTTP smoke test, sau đó publish cùng một
+manifest GHCR cho cả `linux/amd64` và `linux/arm64` để chạy được trên LAB ARM64.
+
 ## Yêu cầu
 
 - Node.js 22

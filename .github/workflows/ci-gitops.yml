@@ -18,7 +18,7 @@ concurrency:
 jobs:
   build-test-publish:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - name: Checkout application
         uses: actions/checkout@v4
@@ -97,21 +97,35 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push the already-tested image and record its digest
+      - name: Publish AMD64 and ARM64 images under one manifest
+        id: publish_image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.image.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Record the immutable multi-architecture digest
         id: publish
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
-          IMAGE_TAG: ${{ steps.image.outputs.tag }}
           IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_DIGEST: ${{ steps.publish_image.outputs.digest }}
         shell: bash
         run: |
           set -euo pipefail
-          docker push "$IMAGE_TAG"
-          ref=$(docker image inspect "$IMAGE_TAG" --format '{{index .RepoDigests 0}}')
-          case "$ref" in
-            "$IMAGE_NAME"@sha256:*) ;;
-            *) echo "Unexpected image digest reference"; exit 1 ;;
+          case "$IMAGE_DIGEST" in
+            sha256:*) ;;
+            *) echo "Unexpected image digest"; exit 1 ;;
           esac
+          ref="$IMAGE_NAME@$IMAGE_DIGEST"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "Published image: $ref" >> "$GITHUB_STEP_SUMMARY"
 
@@ -159,9 +173,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          kubectl kustomize gitops/apps/profile |
-            docker run --rm -i ghcr.io/yannh/kubeconform:v0.7.0 \
-              -strict -summary
+          for overlay in gitops/apps/profile gitops/apps/profile-k3s; do
+            kubectl kustomize "$overlay" |
+              docker run --rm -i ghcr.io/yannh/kubeconform:v0.7.0 \
+                -strict -summary
+          done
 
       - name: Commit and push the desired state
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
