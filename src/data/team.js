@@ -1,5 +1,6 @@
 // Thay nội dung trong file này bằng thông tin thật của nhóm trước khi public repo.
 export const team = {
+  ciFailureEvidence: ,
   name: 'Cloud Native Crew',
   course: 'IS402 — Cloud Computing',
   classCode: 'IS402',
