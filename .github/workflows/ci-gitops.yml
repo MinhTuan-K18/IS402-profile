@@ -70,7 +70,7 @@ jobs:
           set -euo pipefail
           docker run -d --name profile-ci -p 127.0.0.1:8080:8080 "$IMAGE_TAG"
           ready=0
-          for attempt in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8080/healthz; then
               ready=1
               break
@@ -147,6 +147,21 @@ jobs:
               raise SystemExit(f'Expected one image field, found {count}')
           path.write_text(new)
           PY
+
+      - name: Setup kubectl for GitOps validation
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.34.3
+
+      - name: Validate the updated GitOps manifests
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl kustomize gitops/apps/profile |
+            docker run --rm -i ghcr.io/yannh/kubeconform:v0.7.0 \
+              -strict -summary
 
       - name: Commit and push the desired state
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
