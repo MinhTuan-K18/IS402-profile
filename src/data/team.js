@@ -3,7 +3,7 @@ export const team = {
   name: 'Cloud Native Crew',
   course: 'IS402 — Cloud Computing',
   classCode: 'IS402',
-  version: 'v1.4 — Magnum GitOps Demo',
+  version: 'v1.5 — Video Demo Magnum',
   intro:
     'Nhóm chúng em xây dựng một quy trình triển khai frontend có thể lặp lại: từ một commit React đến container chạy trên Kubernetes được cấp phát bởi OpenStack Magnum.',
   members: [
