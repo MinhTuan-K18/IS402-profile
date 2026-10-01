@@ -127,6 +127,8 @@ jobs:
           esac
           ref="$IMAGE_NAME@$IMAGE_DIGEST"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          # Collector ngoài CI đọc dòng này để liên kết SHA ứng dụng với OCI index.
+          echo "Published image: $ref"
           echo "Published image: $ref" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Checkout the separate GitOps repository
@@ -193,4 +195,26 @@ jobs:
             exit 0
           fi
           git commit -m "Deploy profile from app commit $GITHUB_SHA"
-          git push origin HEAD:main
+          GITOPS_SHA=$(git rev-parse HEAD)
+          # Chỉ ghi mốc thời gian/commit; không ghi token hoặc cấp quyền cluster cho CI.
+          emit_timeline() {
+            python3 - "$1" "$GITOPS_SHA" <<'PY'
+          import datetime, json, os, socket, sys, time
+          print('IS402_TIMELINE ' + json.dumps({
+              'stage': sys.argv[1],
+              'source_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              'app_sha': os.environ['GITHUB_SHA'],
+              'actions_run_id': os.environ['GITHUB_RUN_ID'],
+              'gitops_sha': sys.argv[2],
+              'host': socket.gethostname(),
+              'monotonic_ns': time.monotonic_ns(),
+          }))
+          PY
+          }
+          emit_timeline gitops_push_started
+          if git push origin HEAD:main; then
+            emit_timeline gitops_push_finished
+          else
+            emit_timeline gitops_push_failed
+            exit 1
+          fi
